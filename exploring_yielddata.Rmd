@@ -1,0 +1,101 @@
+---
+title: "Exploring Yield Data"
+author: "Samantha M. Roth"
+date: "May 14, 2020"
+output: html_document
+---
+Load some packages that might be relevant.
+```{r}
+# loading packages
+library(car)
+library(glmnet)
+library(openintro)
+# library(interactions)
+#library(sjPlot)
+library(ggplot2)
+```
+
+First, we read in the data.
+```{r}
+corn_yield_df<- read.csv(file="c:/Users/smr31/advising related/climate and crop research- summer 2020/Climate_CornYield-master/Climate_CornYield-master/yielddata.csv", header=TRUE)
+head(corn_yield_df)
+names(corn_yield_df)
+sapply(corn_yield_df, class)
+```
+
+Next, we look for NAs in all of the different columns. It looks as though "Week.Ending", "Zip.Code", "Region", "Watershed", and "CV...." are columns of all NAs. For County ANSI, it appears that a fair amount of values are missing (integers). What should be done about this?
+```{r}
+#which(is.na(corn_yield_df$Program)) #no NAs
+#which(is.na(corn_yield_df$Year)) #no NAs
+#which(is.na(corn_yield_df$Period)) #no NAs
+#which(is.na(corn_yield_df$Geo.Level)) #no NAs
+#which(is.na(corn_yield_df$State)) #no NAs
+#which(is.na(corn_yield_df$State.ANSI)) #no NAs
+#which(is.na(corn_yield_df$Ag.District)) #no NAs
+#which(is.na(corn_yield_df$Ag.District.Code)) #no NAs
+#which(is.na(corn_yield_df$County)) #no NAs
+#length(which(is.na(corn_yield_df$County.ANSI))) #2037 NAs
+#length(which(is.na(corn_yield_df$watershed_code))) #no NAs
+#length(which(is.na(corn_yield_df$Commodity))) #no NAs
+#length(which(is.na(corn_yield_df$Data.Item))) #no NAs
+#length(which(is.na(corn_yield_df$Domain))) #no NAs
+length(which(is.na(corn_yield_df$Domain.Category))) #no NAs
+#length(which(is.na(corn_yield_df$Value))) #no NAs
+```
+So the only variable that didn't either have almost all NAs or no NAs was County.ANSI.
+
+```{r}
+length(which(is.na(corn_yield_df$County.ANSI)))/length(corn_yield_df$County.ANSI)
+```
+So 0.03955417 or just under 4% of observations are missing. This doesn't seem terrible. Since ANSI values are "standardized numeric or alphabetic codes issued by the American National Standards Institute (ANSI) to ensure uniform identification of geographic entities through all federal government agencies" and are not any kind of sensor measurement, it wouldn't make sense for extreme values to be the reason for missingness. *What could the reason for missingness be?*
+
+Next we see if all of the values are actually missing for the variables that look like all the values are missing.
+```{r}
+length(which(is.na(corn_yield_df$Week.Ending)))
+length(which(is.na(corn_yield_df$Zip.Code)))
+length(which(is.na(corn_yield_df$Region)))
+length(which(is.na(corn_yield_df$Watershed)))
+length(which(is.na(corn_yield_df$CV....)))
+```
+Yup, these variables are literally all missing. So we'll just get rid of them.
+```{r}
+corn_yield_df<- cbind(corn_yield_df$Program, corn_yield_df$Year, corn_yield_df$Period, corn_yield_df$Geo.Level, corn_yield_df$State, corn_yield_df$State.ANSI, corn_yield_df$Ag.District, corn_yield_df$Ag.District.Code, corn_yield_df$County, corn_yield_df$County.ANSI, corn_yield_df$watershed_code, corn_yield_df$Commodity, corn_yield_df$Data.Item, corn_yield_df$Domain, corn_yield_df$Domain.Category, corn_yield_df$Value)
+colnames(corn_yield_df)<- c("Program", "Year", "Period","Geo.Level", "State", "State.ANSI", "Ag.District", "Ag.District.Code", "County", "County.ANSI", "watershed_code", "Commodity", "Data.Item", "Domain", "Domain.Category", "Value")
+corn_yield_df<- as.data.frame(corn_yield_df)
+```
+
+Okay, now that we have the data in order, we can look at it. Or maybe we should figure out what to do about the missing values of County.ANSI first if they are important. 
+Next, we'll check the existing data to see if there are any weird values or outliers. We'll start with seeing which variables relay no information at all. We check Program, Period, Geo.Level, watershed_code, Commodity, Data.Item, Domain, Domain.Category
+```{r}
+length(which(corn_yield_df$Program!=1))
+length(which(corn_yield_df$Period!=1))
+length(which(corn_yield_df$Geo.Level!=1))
+length(which(corn_yield_df$watershed_code!=0))
+length(which(corn_yield_df$Commodity!=1))
+length(which(corn_yield_df$Data.Item!=1))
+length(which(corn_yield_df$Domain!=1))
+length(which(corn_yield_df$Domain.Category!=1))
+```
+Since for each of these variables, all of the values are the same, they convey no valuable information, so we can get rid of them.
+```{r}
+corn_yield_df<- cbind(corn_yield_df$Year, corn_yield_df$State, corn_yield_df$State.ANSI, corn_yield_df$Ag.District, corn_yield_df$Ag.District.Code, corn_yield_df$County, corn_yield_df$County.ANSI, corn_yield_df$Value)
+colnames(corn_yield_df)<- c("Year", "State", "State.ANSI", "Ag.District", "Ag.District.Code", "County", "County.ANSI", "Value")
+corn_yield_df<- as.data.frame(corn_yield_df)
+```
+Next, for the remaining informative variables, we'll see if there are any outliers/weird values.
+```{r}
+hist(corn_yield_df$Year)
+hist(corn_yield_df$State)
+hist(corn_yield_df$State.ANSI)
+hist(corn_yield_df$Ag.District)
+hist(corn_yield_df$Ag.District.Code)
+hist(corn_yield_df$County)
+hist(corn_yield_df$County.ANSI)
+hist(corn_yield_df$Value)
+```
+It appears that we have many more observations from year between 1980 and 2010 than for others years. The variables between year and value are all categorical, so we're ignoring them. The histogram of values is unimodal and almost symmetric, but slightly right skewed.It doesn't look like there are any obvious outliers. 
+
+According to Haochen: "rows with missing ANSI are the data that combines the rest counties together because these counties may have too low or incomplete yield data. You may just neglect these rows, which is what I'm doing." So I'll get rid of those rows. 
+```{r}
+corn_yield_df<- corn_yield_df[-which(is.na(corn_yield_df$County.ANSI)),]
+```

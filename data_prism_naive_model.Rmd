@@ -1,0 +1,291 @@
+---
+title: "data_prism_naive_models"
+author: "Samantha M. Roth"
+date: "May 20, 2020"
+output: html_document
+---
+Load some packages that might be relevant.
+```{r}
+library(car)
+library(glmnet)
+library(openintro)
+# library(interactions)
+#library(sjPlot)
+library(ggplot2)
+```
+We'll check the data from the dataframe Data_prism. 
+```{r}
+load("Data_prism")
+length(which(is.na(Data_prism1$Yield)))
+length(which(is.na(Data_prism1$Yield_anomaly)))
+length(which(is.na(Data_prism1$GDD)))
+length(which(is.na(Data_prism1$GDD_anomaly)))
+length(which(is.na(Data_prism1$EDD)))
+length(which(is.na(Data_prism1$EDD_anomaly)))
+length(which(is.na(Data_prism1$Pr)))
+length(which(is.na(Data_prism1$SPI)))
+length(which(is.na(Data_prism1$Area)))
+length(which(is.na(Data_prism1$StateANSI)))
+length(which(is.na(Data_prism1$countyANSI)))
+length(which(is.na(Data_prism1$flips)))
+length(which(is.na(Data_prism1$year)))
+length(which(is.na(Data_prism1$lat)))
+length(which(is.na(Data_prism1$lon)))
+```
+None of the columns in the dataframe contain any NAs! Yay! Now I'll do a histogram for each column just to make sure none of the values look weird.
+```{r}
+hist(Data_prism1$Yield); hist(Data_prism1$Yield_anomaly); hist(Data_prism1$GDD); hist(Data_prism1$GDD_anomaly); hist(Data_prism1$EDD); hist(Data_prism1$EDD_anomaly); hist(Data_prism1$Pr); hist(Data_prism1$SPI); hist(Data_prism1$Area); hist(as.numeric(Data_prism1$StateANSI)); hist(Data_prism1$countyANSI); hist(as.numeric(Data_prism1$fips)); hist(as.numeric(Data_prism1$year)); hist(Data_prism1$lat); hist(Data_prism1$lon) 
+```
+The distribution of yield is symmetric, unimodal, and bell-shaped. The distribution of yield anomaly is less bell shaped but is unimodal. The distribution of GDD is approximately symmetric and unimodal. The distribution of GDD_anomaly is approximately symmetric and unimodal. The distribution of EDD is strongly right-skewed and unimodal. The distribution of EDD_anomaly is slightly right skewed and unimodal. The distribution of Pr is slightly right-skewed and unimodal. The distribution of SPI is approximately symmetric and unimodal. The distribution of Area is weird but there are no outliers to indicate any errors. The distributions of StateANSI, flips, year, lat, and lon also do not indicate any errors. There is an outlier in countyANSI with a value of about 800 that might need to be investigated since it is very different from the other values. We just need to make sure it is not a type-o.
+```{r}
+length(which(Data_prism1$countyANSI> 700))
+```
+Since there are 63 counties with an ANSI in the 800 range, I am assuming this is not an error and just has to do with the way the counties are coded. Next, we'll consider the scatterplots to look for relationships between the variables.
+```{r}
+#anomalies_df<- as.data.frame(cbind(Data_prism1$Yield_anomaly, Data_prism1$GDD_anomaly, Data_prism1$EDD_anomaly, #Data_prism1$SPI, Data_prism1$year))
+#colnames(anomalies_df)<- c("Yield_anomaly","GDD_anomaly","EDD_anomaly","SPI","year")
+pairs(~Yield_anomaly + GDD_anomaly + EDD_anomaly+ SPI+ Area + year, data= Data_prism1)
+```
+There appears to be a positive interaction between GDD_anomaly and EDD_anomaly and a negative interaction between EDD_anomaly and SPI. There appears to be a positive interaction between year and GDD_anomaly and a possible interaction between year and EDD_anomaly. Area does not appear to be correlated with any of the other variables. Next, we'll look more closely at the potential relationships betweeen Yield_anomaly and the other variables.
+
+```{r}
+plot(Data_prism1$GDD_anomaly, Data_prism1$Yield_anomaly)
+```
+It looks as though we may need a squared term to describe the relationship between GDD_anomaly and Yield_anomaly.
+```{r}
+plot(Data_prism1$EDD_anomaly, Data_prism1$Yield_anomaly)
+```
+This relationship generally looks negative. There is a curious group of outliers between -50 and 0 EDD_anomaly.
+```{r}
+plot(Data_prism1$SPI, Data_prism1$Yield_anomaly)
+```
+This looks like a slightly positive relationship but may be better modeled using a polynomial with degree 2.
+
+After fitting the model, we'll see if there are any strong enough outliers that we can statistically justify getting rid of them (using Bonferroni's test). We'll also calculate the variance inflation factor (VIF)
+```{r}
+fit= lm(Yield_anomaly ~ poly(GDD_anomaly,2) + EDD_anomaly + poly(SPI,2) + GDD_anomaly:EDD_anomaly + EDD_anomaly:SPI + GDD_anomaly:SPI + Area, data= Data_prism1)
+summary(fit)
+vif(fit)
+outlierTest(fit)
+AIC(fit)
+```
+The five largest outliers were observations 53184, 55583, 55806, 55289, 9055.
+All regressors are significant at the .05 level, excluding the intercept term and Area, including all polynomial and interaction terms. The p value for the F test was < 2.2e-16. The AIC of this model is 400298.2 Recall that a lower AIC value indicates a better model fit. Since the coefficient for Area was not significant, we eliminate Area.
+
+The GVIF^(1/(2DF)) is analogous to the square root of the regular VIF. Since all of the GVIF^(1/(2Df)) values are relatively small (<2), we don't need to be too concerned about multicollinearity inflating the error variance (http://web.vu.lt/mif/a.buteikis/wp-content/uploads/PE_Book/4-5-Multiple-collinearity.html). 
+
+There were 10 points determined to be outliers by the Bonferroni test (http://math.furman.edu/~dcs/courses/math47/R/library/car/html/outlier.test.html). So we could try fitting the model without the most extreme outlying points and with them to see what changes.
+```{r}
+beta.hat=fit$coef #get the coefficient estimates
+yhat=fit$fitted #get the fitted values of y
+resids=fit$resid #get the residuals
+```
+
+#assumption 1: homoscedasticity of residuals (constant variance): Plot the fitted values against the residuals
+#assumption 2: normality of errors: QQPlot
+
+```{r}
+yhat=fitted(fit)
+eps=resid(fit)
+plot(yhat,eps,main="y-hat vs residuals")
+abline(h=0,col="red",lwd=2)
+qqnorm(eps)
+qqline(eps)
+```
+*Constant Error Variance Assumption*
+It doesn't appear that the constant error variance assumption has been violated. YAY. 
+*Normality of Errors Assumption*
+The QQ Plot indicates that the tails are thicker than those of the normal distribution.
+
+*Correctly Specified Relationship between Response and Predictors*
+Check using: Partial Residual Plots. We'll use the prp code provided by Prof. Hanks. 
+```{r}
+source("C:/Users/smr31/STAT511/partial residual plots.r")
+## mean structure
+prp(fit,data= Data_prism1,names=c("GDD_anomaly"))
+prp(fit,data= Data_prism1,names=c("EDD_anomaly"))
+prp(fit,data= Data_prism1,names=c("SPI"))
+```
+Based on the partial residual plots, it appears that the relationship between GDD_anomaly and Yield_anomaly is close to correctly specified, but is a bit less accurate for very large and very small values of GDD_anomaly. However, I think the polynomial of degree 2 is sufficient to describe this relationship. Also, a degree 2 or 3 polynomial may be necessary to correctly specify the relationship between EDD_anomaly and Yield_anomaly. The relationship currently specified appears to fit better for moderate values of EDD_anomaly. The polynomial describing the relationship between SPI and Yield_anomaly appears to be sufficient, but fits slightly less well for very large values of SPI.
+
+****************************************************************************************************
+Now we consider refitting the first model with the 5 most severe identified outliers removed.
+```{r}
+Outliers<- c(53184, 55583, 55806, 55289, 9055)
+Data_prism_less_outliers <- Data_prism1[!rownames(Data_prism1) %in% Outliers , ]
+```
+
+```{r}
+fit_less= lm(Yield_anomaly ~ poly(GDD_anomaly,2) + EDD_anomaly + poly(SPI,2) + GDD_anomaly:EDD_anomaly + EDD_anomaly:SPI + GDD_anomaly:SPI, data= Data_prism_less_outliers)
+summary(fit_less)
+vif(fit_less)
+outlierTest(fit_less)
+AIC(fit_less)
+```
+400196.5 is the AIC of this model. All of the regressors are still significant at the .05 level. 
+
+```{r}
+beta.hat=fit_less$coef #get the coefficient estimates
+yhat=fit_less$fitted #get the fitted values of y
+resids=fit_less$resid #get the residuals
+yhat=fitted(fit_less)
+eps=resid(fit_less)
+plot(yhat,eps,main="y-hat vs residuals")
+abline(h=0,col="red",lwd=2)
+qqnorm(eps)
+qqline(eps)
+```
+QQ plot and residual plot look about the same as with the last model. There are a couple less points that are really far from the others (the outliers that were removed)
+
+```{r}
+source("C:/Users/smr31/STAT511/partial residual plots.r")
+## mean structure
+prp(fit_less,data= Data_prism1,names=c("GDD_anomaly"))
+prp(fit_less,data= Data_prism1,names=c("EDD_anomaly"))
+prp(fit_less,data= Data_prism1,names=c("SPI"))
+```
+The GDD_anomaly and SPI PRPs look about the same as they did before removing the 5 worst outliers, but EDD_anomaly PRP looks a bit worse for the highest values of EDD_anomaly.
+****************************************************************************************************
+
+So next we'll try a polynomial term for EDD_anomaly and see if that yields any statistically significant coefficients or improves the AIC.
+```{r}
+fit2= lm(Yield_anomaly ~ poly(GDD_anomaly,2) + poly(EDD_anomaly,2) + poly(SPI,2) + GDD_anomaly:EDD_anomaly + EDD_anomaly:SPI + GDD_anomaly:SPI, data= Data_prism1)
+summary(fit2)
+vif(fit2)
+outlierTest(fit2)
+AIC(fit2)
+```
+All terms here are significant at the .01 level except for the linear term for SPI. All of the GVIF^(1/(2*Df))s are <2, equivalent to VIFs of less than 4. 10 outlier points were again identified. First, we'll see how the model performs with them left in. The AIC of this model is 400126.5, which is lower than the AIC of the first model, so that's good!
+
+According to this model, the five worst outliers are 53184, 55583, 55806, 55289, 9055. 
+```{r}
+beta.hat=fit2$coef #get the coefficient estimates
+yhat=fit2$fitted #get the fitted values of y
+resids=fit2$resid #get the residuals
+yhat=fitted(fit2)
+eps=resid(fit2)
+plot(yhat,eps,main="y-hat vs residuals")
+abline(h=0,col="red",lwd=2)
+qqnorm(eps)
+qqline(eps)
+```
+QQ plot and residual plot look about the same as with the last model. 
+
+```{r}
+source("C:/Users/smr31/STAT511/partial residual plots.r")
+## mean structure
+prp(fit2,data= Data_prism1,names=c("GDD_anomaly"))
+prp(fit2,data= Data_prism1,names=c("EDD_anomaly"))
+prp(fit2,data= Data_prism1,names=c("SPI"))
+```
+The partial residual plots look similar to those of the last model, but the one for EDD_anomaly looks a bit better. We should still try the degree 3 polynomial for EDD_anomaly though.
+
+*********************************************************************************
+Now we consider refitting the second model with the 5 most severe identified outliers removed.
+```{r}
+Outliers<- c(53184, 55583, 55806, 55289, 9055)
+Data_prism_less_outliers <- Data_prism1[!rownames(Data_prism1) %in% Outliers , ]
+```
+
+```{r}
+fit_less2= lm(Yield_anomaly ~ poly(GDD_anomaly,2) + poly(EDD_anomaly,2) + poly(SPI,2) + GDD_anomaly:EDD_anomaly + EDD_anomaly:SPI + GDD_anomaly:SPI, data= Data_prism_less_outliers)
+summary(fit_less)
+vif(fit_less2)
+outlierTest(fit_less2)
+AIC(fit_less2)
+```
+399820.3 is the AIC of this model, which is smaller than the first model with outliers removed. All of the regressors are still significant at the .05 level, except for the intercept.  
+
+```{r}
+beta.hat=fit_less2$coef #get the coefficient estimates
+yhat=fit_less2$fitted #get the fitted values of y
+resids=fit_less2$resid #get the residuals
+yhat=fitted(fit_less2)
+eps=resid(fit_less2)
+plot(yhat,eps,main="y-hat vs residuals")
+abline(h=0,col="red",lwd=2)
+qqnorm(eps)
+qqline(eps)
+```
+QQ plot and residual plot look about the same as with the last model. There are a couple less points that are really far from the others (the outliers that were removed)
+
+```{r}
+source("C:/Users/smr31/STAT511/partial residual plots.r")
+## mean structure
+prp(fit_less2,data= Data_prism1,names=c("GDD_anomaly"))
+prp(fit_less2,data= Data_prism1,names=c("EDD_anomaly"))
+prp(fit_less2,data= Data_prism1,names=c("SPI"))
+```
+The PRPs look about the same, but the PRP for EDD_anomaly looks a bit better (red line closer to blue line) for large values of EDD_anomaly than it did for the first model with outliers removed.
+*********************************************************************************
+Next, we fit a degree 3 polynomial for EDD_anomaly to see if that helps 
+```{r}
+fit3= lm(Yield_anomaly ~ poly(GDD_anomaly,2) + poly(EDD_anomaly,3) + poly(SPI,2) + GDD_anomaly:EDD_anomaly + EDD_anomaly:SPI + GDD_anomaly:SPI, data= Data_prism1)
+summary(fit3)
+vif(fit3)
+outlierTest(fit3)
+AIC(fit3)
+```
+The AIC of this model, 399846, is the lowest yet of all the models that retained the outliers. Yay! Also, the GVIF^(1/(2*Df))s are all still <sqrt(5) and we still have 10 outliers. All terms are significant at the .05 level except for the linear term of SPI. 
+The five worst outliers in this model are 53184,55583,55806,55289,54078. In previous models, the five worst outliers were 53184, 55583, 55806, 55289, 9055, i.e. the least bad of the five changed in this model.
+```{r}
+beta.hat=fit3$coef #get the coefficient estimates
+yhat=fit3$fitted #get the fitted values of y
+resids=fit3$resid #get the residuals
+yhat=fitted(fit3)
+eps=resid(fit3)
+plot(yhat,eps,main="y-hat vs residuals")
+abline(h=0,col="red",lwd=2)
+qqnorm(eps)
+qqline(eps)
+```
+Wow, this residual plot looks noticeably better than the other two!!
+```{r}
+source("C:/Users/smr31/STAT511/partial residual plots.r")
+## mean structure
+prp(fit3,data= Data_prism1,names=c("GDD_anomaly"))
+prp(fit3,data= Data_prism1,names=c("EDD_anomaly"))
+prp(fit3,data= Data_prism1,names=c("SPI"))
+```
+The PRP for GDD_anomaly looks about the same. The PRP plot for EDD_anomaly looks kind of off since it changed to fit the outliers, and the PRP plot for SPI looks about the same. We'll refit these models with the outliers removed and see if we get better results. Weirdly, these 2 troublesome outliers must influence the model too much, since they never seem to be flagged by Bonferroni's outlier test.
+
+***********************************************************************************************
+Now we consider refitting the third model with the 5 most severe identified outliers removed.
+```{r}
+Outliers<- c(53184,55583,55806,55289,54078)
+Data_prism_less_outliers <- Data_prism1[!rownames(Data_prism1) %in% Outliers , ]
+```
+
+```{r}
+fit_less3= lm(Yield_anomaly ~ poly(GDD_anomaly,2) + poly(EDD_anomaly,3) + poly(SPI,2) + GDD_anomaly:EDD_anomaly + EDD_anomaly:SPI + GDD_anomaly:SPI, data= Data_prism_less_outliers)
+summary(fit_less3)
+vif(fit_less3)
+outlierTest(fit_less3)
+AIC(fit_less3)
+```
+399545.3 is the AIC of this model, which is smaller than the first two models with outliers removed. All of the regressors are still significant at the .05 level, except for the linear term for SPI.
+
+```{r}
+beta.hat=fit_less3$coef #get the coefficient estimates
+yhat=fit_less3$fitted #get the fitted values of y
+resids=fit_less3$resid #get the residuals
+yhat=fitted(fit_less3)
+eps=resid(fit_less3)
+plot(yhat,eps,main="y-hat vs residuals")
+abline(h=0,col="red",lwd=2)
+qqnorm(eps)
+qqline(eps)
+```
+QQ plot and residual plot look noticeably better than those of the last two models. 
+
+```{r}
+source("C:/Users/smr31/STAT511/partial residual plots.r")
+## mean structure
+prp(fit_less3,data= Data_prism1,names=c("GDD_anomaly"))
+prp(fit_less3,data= Data_prism1,names=c("EDD_anomaly"))
+prp(fit_less3,data= Data_prism1,names=c("SPI"))
+```
+The PRPs look about the same, but the PRP for EDD_anomaly looks a bit weird (red line curves up to the outliers, further from the blue line) for large values of EDD_anomaly. Since we want the red line and blue line to be on top of each other, this is not super preferable.
+
+Despite the unfavorable PRP for EDD_anomaly, it appears that the third model is the best out of the models (with and without outliers) so far in terms of having the lowest AIC. So this could be considered the best model. Based on the PRP plots, Yield_anomaly seems to increase with GDD_anomaly until GDD_anomaly hits about 150, then Yield_anomaly starts to decrease as GDD_anomaly increases. The PRP plot for EDD_anomaly reflects a very slight increase in Yield_anomaly with EDD_anomaly between about -100 and -75, then as EDD_anomaly increases from about -75 to about 150, Yield_anomaly decreases. According to the PRP plot from the last model, Yield_anomaly then starts to increase with EDD_anomaly again. However, this trend is only based on two points that are far away from the rest of the data, which makes this change suspecious in my opinion. In other models, Yield_anomaly is simply decreasing as EDD_anomaly increases the whole time. 
+

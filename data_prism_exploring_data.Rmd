@@ -1,0 +1,26 @@
+---
+title: "data_prism_exploring_data"
+author: "Samantha M. Roth"
+date: "May 28, 2020"
+output: html_document
+---
+
+```{r}
+source("http://www.stat.psu.edu/~mharan/batchmeans.R")
+```
+
+```{r}
+load("Data_prism")
+```
+
+```{r}
+length(unique(Data_prism$countyANSI))
+length(unique(Data_prism$StateANSI))
+length(unique(Data_prism$fips))
+length(unique(Data_prism$lat))
+length(unique(Data_prism$lon))
+length(unique(Data_prism$year))
+length(Data_prism$Yield)
+```
+So we have 1820 unique counties (FIPS values), 24 unique states, 1819 unique latitudes and longitudes, 32 unique years. The number of observations is 47498. 
+If there was one observation per year per unique location, there would be 58240 observations. But we only have 47498. 
