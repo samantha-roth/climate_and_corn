@@ -17,24 +17,113 @@ library(ggplot2)
 ```
 
 ```{r}
-hist(Data_prism1$Yield);  hist(Data_prism1$GDD); hist(Data_prism1$EDD);hist(sqrt(Data_prism1$EDD)); hist(Data_prism1$Pr)
+hist(Data_prism$Yield);  hist(Data_prism$GDD); hist(Data_prism$EDD);hist(sqrt(Data_prism$EDD)); hist(Data_prism$Pr); hist(sqrt(Data_prism$Pr))
 ```
-The histogram for sqrt(EDD) looks much less skewed than the histogram for EDD.
+The histogram for sqrt(EDD) looks much less skewed than the histogram for EDD. 
+
 ```{r}
-sqrtEDD<- sqrt(Data_prism1$EDD)
-Data_prism1<- as.data.frame(cbind(Data_prism1, sqrtEDD))
+Data_prism$sqrtEDD<- sqrt(Data_prism$EDD)
+Data_prism$year<- as.integer(Data_prism$year)
+Data_prism$fips<- as.factor(Data_prism$fips)
 ```
 We should first look at the pairs plot
 ```{r}
-pairs(~Yield+GDD+sqrtEDD+Pr+year, data=Data_prism1)
+pairs(~Yield+GDD+sqrtEDD+Pr+year, data=Data_prism)
 ```
 Hmm it looks like GDD and sqrtEDD are almost linearly related.
 
 ```{r}
-fit= lm(Yield~ GDD + sqrtEDD + Pr + GDD:sqrtEDD + GDD:Pr + sqrtEDD:Pr, data= Data_prism1)
+fit= lm(Yield~ GDD + sqrtEDD + Pr + GDD:sqrtEDD + GDD:Pr + sqrtEDD:Pr, data= Data_prism)
 summary(fit)
 AIC(fit)
 vif(fit)
 outlierTest(fit)
 ```
 The VIFs are very large for all of the regressors. This is bad. So a simple linear regression model worked much bettter for Yield_anomaly, GDD_anomaly, EDD_anomaly, and SPI than for the raw data. 
+Let's see what else I can come up with by combining Haochen's model with mine
+```{r}
+fit= lm(Yield~ GDD + sqrtEDD + Pr + GDD:sqrtEDD + GDD:Pr + sqrtEDD:Pr + fips, data= Data_prism)
+summary(fit)
+AIC(fit)
+vif(fit)
+outlierTest(fit)
+```
+AIC: 427036.9
+
+*assumption 1: homoscedasticity of residuals (constant variance): Plot the fitted values against the residuals*
+*assumption 2: normality of errors: QQPlot*
+```{r}
+beta.hat=fit$coef #get the coefficient estimates
+yhat=fitted(fit)
+eps=resid(fit)
+plot(yhat,eps,main="y-hat vs residuals")
+abline(h=0,col="red",lwd=2)
+qqnorm(eps)
+qqline(eps)
+```
+The residual plot doesn't look too bad for medium to large values of yhat. Not sure if fanning is present or we just have many observations with medium to large values of yhat.
+The normal QQ-Plot doesn't look amazing but I've seen worse.
+
+*Correctly Specified Relationship between Response and Predictors*
+Check using: Partial Residual Plots. We'll use the prp code provided by Prof. Hanks. 
+```{r}
+source("C:/Users/smr31/STAT511/partial residual plots.r")
+## mean structure
+prp(fit,data= Data_prism,names=c("GDD"))
+prp(fit,data= Data_prism,names=c("sqrtEDD"))
+prp(fit,data= Data_prism,names=c("Pr"))
+```
+There appears to be a more complicated relationship between GDD and Yield. 
+
+```{r}
+fit= lm(Yield~ poly(GDD,2) + sqrtEDD + Pr + GDD:sqrtEDD + GDD:Pr + sqrtEDD:Pr + fips, data= Data_prism)
+summary(fit)
+AIC(fit)
+vif(fit)
+outlierTest(fit)
+```
+
+So next I'll do weighted least squares like Haochen did with weights equal to the area to see if there's any improvement. 
+```{r}
+fit= lm(Yield~ GDD + sqrtEDD + Pr + GDD:sqrtEDD + GDD:Pr + sqrtEDD:Pr + fips, weights= Data_prism$Area, data= Data_prism)
+summary(fit)
+AIC(fit)
+vif(fit)
+#outlierTest(fit)
+```
+AIC:  450505.5. bigger than AIC of model without weigths. Boo.
+
+```{r}
+fit= lm(Yield~ GDD + sqrtEDD + poly(Pr,2) + GDD:sqrtEDD + GDD:Pr + sqrtEDD:Pr + fips, data= Data_prism)
+summary(fit)
+AIC(fit)
+vif(fit)
+outlierTest(fit)
+```
+
+426624.3= AIC. This is the lowest AIC so far. 
+Check the CVMSPE
+```{r}
+tfcv_simple<- function(m= model, d= Data_prism){
+  totlen=dim(d)[1]
+  cvind<-c(1:totlen)
+  groups<-split(cvind,sample(rep(1:10,each = floor(totlen/10))))
+  CV_each<-rep(0,10)
+  for (k in 1:10) {  #10 cross-validation tests
+    test_indx<-groups[[k]]
+    test_data<-d[test_indx, "Yield"]
+    train_indx<-cvind[-test_indx]
+    train_model<- m
+    pred<-predict(train_model,d[test_indx, ]) #which variables to test?
+    trendindex_1<-trendindex[test_indx]
+    CV_each[k]<-mean((pred - test_data)^2)
+    }
+  NPE<-sqrt(mean(CV_each))/mean(d[ ,"Yield"],na.rm=TRUE)
+  return(NPE)
+}
+```
+
+```{r}
+tfcv_simple(m= fit, d= Data_prism)
+```
+0.1955537= NPE
