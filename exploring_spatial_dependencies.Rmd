@@ -1,0 +1,61 @@
+---
+title: "exploring spatial dependencies of residuals"
+author: "Samantha M. Roth"
+date: "June 5, 2020"
+output: html_document
+---
+
+Load data and necessary packages. 
+Residual plot for each year for the model fit2 in the file variable_selection_nofips_yearasint, slightly altered from Haochen's code. Need to have first created a model and added the residuals for that model to the dataframe Data_prism.
+```{r}
+setwd("c:/Users/smr31/advising related/climate and crop research- summer 2020/Climate_CornYield-master-new/Climate_CornYield-master")
+library(sp)
+library(maps)
+library(maptools)
+library(ncdf4)
+library(ggplot2)
+library(usmap)
+library(precintcon)
+library(BMS)
+library(adaptMCMC)
+library(geoR) #for variogram
+library(housingData) #for returning county centroid
+library(gstat)
+library(fields)
+library(binaryLogic)
+load("Data_prism")
+#Data_prism<-Data_prism[complete.cases(Data_prism), ]
+#Data_prism$StateANSI<-factor(Data_prism$StateANSI)
+#Data_prism$year<-as.numeric(Data_prism$year)
+
+dir.create("fig_res_aicfit")
+#load("variable_selection_nofips_yearasint")
+for (i in 1:32){
+  filename<-paste("fig_res_aicfit/aicfit",i,".jpeg",sep="")
+  jpeg(file = filename,width = 800,height=800)
+  index<-which(Data_prism$year==i)
+  a=plot_usmap(regions = "counties",include=c("PA","NY","NJ","MD","DE","DC","NC","VA","SC","WV","OH","MI","GA","KY","IN","IL","AL","TN","WI","MS","MN","MO","LA","AR","IA"),
+               data=Data_prism[index,], values = "residual_aicfit") + labs(title = paste("Yield residual of each county in ",i+1980,sep=""))+ 
+    scale_fill_gradient2(low = "blue",mid="white", high ="red", limits=c(-45,45),name="bu/acre")+theme(plot.title = element_text(size=14))
+  plot(a)
+  dev.off()
+}
+```
+
+
+Residual plot for each year, slightly altered from Haochen's code. Need to have first created a model and added the residuals for that model to the dataframe Data_prism.
+```{r}
+setwd("c:/Users/smr31/advising related/climate and crop research- summer 2020/Climate_CornYield-master-new/Climate_CornYield-master")
+
+dir.create("fig_res_fit2")
+for (i in 1:32){
+  filename<-paste("fig_res_fit2/fit2",i,".jpeg",sep="")
+  jpeg(file = filename,width = 800,height=800)
+  index<-which(Data_prism$year==i)
+  a=plot_usmap(regions = "counties",include=c("PA","NY","NJ","MD","DE","DC","NC","VA","SC","WV","OH","MI","GA","KY","IN","IL","AL","TN","WI","MS","MN","MO","LA","AR","IA"),
+               data=Data_prism[index,], values = "residual_fit2") + labs(title = paste("Yield residual of each county in ",i+1980,sep=""))+ 
+    scale_fill_gradient2(low = "blue",mid="white", high ="red", limits=c(-45,45),name="bu/acre")+theme(plot.title = element_text(size=14))
+  plot(a)
+  dev.off()
+}
+```

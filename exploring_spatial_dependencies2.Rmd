@@ -1,0 +1,61 @@
+---
+title: "exploring_spatial_dependencies2"
+author: "Samantha M. Roth"
+date: "June 16, 2020"
+output: html_document
+---
+
+```{r}
+setwd("c:/Users/smr31/advising related/climate and crop research- summer 2020/Climate_CornYield-master-new/Climate_CornYield-master")
+library(sp)
+library(maps)
+library(maptools)
+library(ncdf4)
+library(ggplot2)
+library(usmap)
+library(precintcon)
+library(BMS)
+library(adaptMCMC)
+library(geoR) #for variogram
+library(housingData) #for returning county centroid
+library(gstat)
+library(fields)
+library(binaryLogic)
+load("Data_prism")
+```
+
+```{r}
+locations<- cbind(Data_prism$lat, Data_prism$lon)
+```
+Create the variogram
+```{r}
+vg_aic<- variog(coords= locations, data= Data_prism$residual_aicfit)
+plot(vg_aic)
+```
+
+```{r}
+#vfit_aic<- variofit(vario= vg_aic, ini.cov.pars= c(1,1))
+#summary(vfit_aic)
+init_s2<- seq(from= 1, to= 1000, length= 1000)
+init_phi<- seq(from= .01, to= 100, length= length(init_s2))
+init<- cbind(init_s2, init_phi)
+vfit_aic<- variofit(vario= vg_aic, ini.cov.pars = init)
+summary(vfit_aic)
+```
+From testing different sets of initial values to mimize the loss function, the estimates are simga^2= 241.004497 and phi= 9.247984.
+
+Next, we'll plot the variogram for aicfit.
+```{r}
+geomodel1<- likfit(coords = locations, data = Data_prism$Yield,
+trend = "cte", ini.cov.pars= c(241.004497,9.247984))
+
+```
+
+
+we want to fit this model: Yield~ GDD + EDD + poly(Pr, 2) + as.numeric(year) + Tmax + Tmin + 
+    lastSF + firstFF + GDD:EDD + GDD:poly(Pr, 2) + poly(Pr, 2):EDD + 
+    GDD:Tmax + GDD:Tmin + GDD:lastSF + GDD:firstFF + EDD:Tmax + 
+    EDD:Tmin + EDD:lastSF + EDD:firstFF + poly(Pr, 2):Tmax + 
+    poly(Pr, 2):Tmin + poly(Pr, 2):lastSF + poly(Pr, 2):firstFF + 
+    Tmax:Tmin + Tmax:lastSF + Tmax:firstFF + Tmin:lastSF + Tmin:firstFF + 
+    lastSF:firstFF
