@@ -1,0 +1,127 @@
+---
+title: "variable selection with years as numeric, no fips"
+author: "Samantha M. Roth"
+date: "June 5, 2020"
+output: html_document
+---
+
+Load data, packages.
+```{r}
+setwd("c:/Users/smr31/advising related/climate and crop research- summer 2020/Climate_CornYield-master-new/Climate_CornYield-master")
+library(sp); library(maps); library(maptools); library(ncdf4); library(ggplot2); library(usmap); library(precintcon); library(BMS); library(adaptMCMC); library(geoR) #for variogram
+library(housingData) #for returning county centroid
+library(gstat); library(fields); library(binaryLogic); library(car)
+load("Data_prism")
+Data_prism<-Data_prism[complete.cases(Data_prism), ]
+Data_prism$StateANSI<-factor(Data_prism$StateANSI)
+Data_prism$year<-as.numeric(Data_prism$year)
+#Data_prism$sqrtEDD<- sqrt(Data_prism$EDD)
+#Data_prism$sqrtPr<- sqrt(Data_prism$Pr)
+```
+
+Full model with all interactions:
+```{r}
+fit<- lm(Yield~ GDD+EDD+ poly(Pr,2) + as.numeric(year) + Tmax + Tmin + lastSF + firstFF + GDD:EDD + GDD:poly(Pr,2) + poly(Pr,2):EDD + GDD:Tmax +GDD:Tmin + GDD:lastSF + GDD:firstFF + EDD:Tmax + EDD:Tmin + EDD:lastSF + EDD:firstFF + poly(Pr,2):Tmax + poly(Pr,2):Tmin + poly(Pr,2):lastSF + poly(Pr,2):firstFF + Tmax:Tmin + Tmax:lastSF + Tmax:firstFF + Tmin:lastSF +Tmin:firstFF + lastSF:firstFF, data= Data_prism) 
+summary(fit); AIC(fit); vif(fit)
+```
+Full Model:
+Residual standard error: 23.66 on 47461 degrees of freedom
+Multiple R-squared:  0.518,	Adjusted R-squared:  0.5176 
+F-statistic:  1417 on 36 and 47461 DF,  p-value: < 2.2e-16
+AIC: 435381.4
+NPE:0.2228865
+
+Ten-fold cross validation
+```{r}
+tfcv_fit<- function(d= Data_prism){
+  totlen=dim(d)[1]
+  cvind<-c(1:totlen)
+  groups<-split(cvind,sample(rep(1:10,each = floor(totlen/10))))
+  CV_each<-rep(NA,10)
+  sse<- rep(NA,10)
+  for (k in 1:10) {  #10 cross-validation tests
+    test_indx<-groups[[k]]
+    test_data<-d[test_indx, ]
+    train_indx<-cvind[-test_indx]
+    train_data<- d[train_indx,]
+    train_model<- lm(Yield ~ GDD_changingGS +EDD_changingGS + poly(Pr_changingGS,2) + year + Tmax + Tmin + lastSF + firstFF + GDD_changingGS:EDD_changingGS + GDD_changingGS:poly(Pr_changingGS,2) + poly(Pr_changingGS,2):EDD_changingGS + GDD_changingGS:Tmax + GDD_changingGS:Tmin + GDD_changingGS:lastSF + GDD_changingGS:firstFF + EDD_changingGS:Tmax + EDD_changingGS:Tmin  + EDD_changingGS:lastSF +EDD_changingGS:firstFF + poly(Pr_changingGS,2):Tmax + poly(Pr_changingGS,2):Tmin + poly(Pr_changingGS,2):lastSF + poly(Pr_changingGS,2):firstFF + Tmax:Tmin +Tmax:lastSF + Tmax:firstFF + Tmin:lastSF +Tmin:firstFF + lastSF:firstFF, data= train_data)
+    pred<-predict(train_model,test_data) #which variables to test?
+    CV_each[k]<-mean((pred - test_data$Yield)^2)
+    sse[k]<- sum((pred - test_data$Yield)^2)
+  }
+  NPE<-sqrt(mean(CV_each))/mean(d[ ,"Yield"],na.rm=TRUE)
+  SSPE<- sum(sse)
+  return(list("NPE" = NPE, "SSPE"=SSPE))
+}
+tfcv_fit()
+```
+
+Next we'll use stepwise AIC variable selection to see if we get any improvements
+```{r}
+aicfit= step(fit)
+summary(aicfit)
+AIC(aicfit)
+Data_prism$hindcast_aicfit<- predict(aicfit, Data_prism)
+Data_prism$residual_aicfit<- Data_prism$Yield-Data_prism$hindcast_aicfit #the residuals
+```
+
+BEST MODEL:
+aicfit: full model but with no EDD:lastSF
+Residual standard error: 23.66 on 47462 degrees of freedom
+Multiple R-squared:  0.518,	Adjusted R-squared:  0.5176 
+F-statistic:  1457 on 35 and 47462 DF,  p-value: < 2.2e-16
+AIC: 435380.8
+NPE: 0.2228338
+
+```{r}
+fitCGS<- lm(Yield~ GDD_changingGS +EDD_changingGS + poly(Pr_changingGS,2) + year + Tmax + Tmin + lastSF + firstFF + GDD_changingGS:EDD_changingGS + GDD_changingGS:poly(Pr_changingGS,2) + poly(Pr_changingGS,2):EDD_changingGS + GDD_changingGS:Tmax + GDD_changingGS:Tmin + GDD_changingGS:lastSF + GDD_changingGS:firstFF + EDD_changingGS:Tmax + EDD_changingGS:Tmin  + EDD_changingGS:lastSF +EDD_changingGS:firstFF + poly(Pr_changingGS,2):Tmax + poly(Pr_changingGS,2):Tmin + poly(Pr_changingGS,2):lastSF + poly(Pr_changingGS,2):firstFF + Tmax:Tmin +Tmax:lastSF + Tmax:firstFF + Tmin:lastSF +Tmin:firstFF + lastSF:firstFF, data= Data_prism) 
+summary(fitCGS); AIC(fitCGS); vif(fitCGS)
+```
+fitCGS: worse
+Residual standard error: 24.37 on 47461 degrees of freedom
+Multiple R-squared:  0.4889,	Adjusted R-squared:  0.4885 
+F-statistic:  1261 on 36 and 47461 DF,  p-value: < 2.2e-16
+AIC: 438168.7
+NPE: 0.2295055
+
+```{r}
+fit2<- lm(Yield~ GDD+EDD+ poly(Pr,2) + year + Tmax + Tmin + lastSF + firstFF + GDD:EDD + GDD:poly(Pr,2) + poly(Pr,2):EDD + GDD:Tmax +GDD:Tmin + GDD:lastSF + GDD:firstFF + EDD:Tmax + EDD:Tmin  + EDD:firstFF + poly(Pr,2):Tmax + poly(Pr,2):Tmin + poly(Pr,2):lastSF + poly(Pr,2):firstFF + Tmax:Tmin + Tmax:firstFF + Tmin:lastSF +Tmin:firstFF + lastSF:firstFF, data= Data_prism) 
+summary(fit2); AIC(fit2); vif(fit2)
+```
+A little worse:
+fit2: no Tmax:lastSF, no EDD:lastSF
+Residual standard error: 23.66 on 47463 degrees of freedom
+Multiple R-squared:  0.518,	Adjusted R-squared:  0.5176 
+F-statistic:  1500 on 34 and 47463 DF,  p-value: < 2.2e-16
+AIC: 435381
+NPE: 0.2228652
+
+```{r}
+beta.hat=aicfit$coef #get the coefficient estimates
+yhat=fitted(aicfit)
+eps=resid(aicfit)
+plot(yhat,eps,main="y-hat vs residuals")
+abline(h=0,col="red",lwd=2)
+qqnorm(eps)
+qqline(eps)
+```
+The residual plot looks pretty good, it seems as though there are many more medium values of yhat that small and large values of yhat. This is backed up by the histogram below.
+```{r}
+hist(yhat)
+```
+
+The appearance of possible fanning is potentially due to the distribution of yhat.
+```{r}
+source("C:/Users/smr31/STAT511/partial residual plots.r")
+## mean structure
+prp(aicfit,data= Data_prism,names=c("GDD"))
+prp(aicfit,data= Data_prism,names=c("EDD"))
+prp(aicfit,data= Data_prism,names=c("Pr"))
+prp(aicfit,data= Data_prism,names=c("year"))
+prp(aicfit,data= Data_prism,names=c("lastSF"))
+prp(aicfit,data= Data_prism,names=c("firstFF"))
+prp(aicfit,data= Data_prism,names=c("Tmax"))
+prp(aicfit,data= Data_prism,names=c("Tmin"))
+```
+The relationship between lastSF and Yield appear to be well accounted for. There's one outlier shown in the firstFF PRP. It appears that the mean relationships are fairly well specified for all regressors. It looks like all of the relationships for GDD, EDD and Pr are well accounted for!
+

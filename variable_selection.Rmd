@@ -1,0 +1,335 @@
+---
+title: "variable selection"
+author: "Samantha M. Roth"
+date: "June 5, 2020"
+output: html_document
+---
+In this code we will use a variety of variable selection methods to see if any other regressors are important besides those already tested. 
+
+First, load data and necessary packages.
+```{r}
+#setwd("c:/Users/smr31/advising related/climate and crop research- summer 2020/Climate_CornYield-master-new/Climate_CornYield-master")
+library(sp); library(maps); library(maptools); library(ncdf4); library(ggplot2); library(usmap); library(precintcon); library(BMS); library(adaptMCMC); library(geoR) #for variogram
+library(housingData) #for returning county centroid
+library(gstat); library(fields); library(binaryLogic)
+load("Data_prism")
+Data_prism<-Data_prism[complete.cases(Data_prism), ]
+Data_prism$StateANSI<-factor(Data_prism$StateANSI)
+Data_prism$year<-factor(Data_prism$year)
+#Data_prism$sqrtEDD<- sqrt(Data_prism$EDD)
+#Data_prism$sqrtPr<- sqrt(Data_prism$Pr)
+```
+
+```{r}
+fit<- lm(Yield~ GDD+EDD+ poly(Pr,2)+ GDD:EDD + GDD:Pr + Pr:EDD +year+ fips + Tmax + Tmin + lastSF + firstFF, data= Data_prism) #year and fips are fixed effects
+summary(fit); AIC(fit); tfcv_simple(fit)
+```
+AIC: 401937.5
+NPE: 0.1506904
+Residual standard error: 16.33 on 45636 degrees of freedom
+Multiple R-squared:  0.7793,	Adjusted R-squared:  0.7703 
+F-statistic: 86.57 on 1861 and 45636 DF,  p-value: < 2.2e-16
+
+
+```{r}
+tfcv_lasso<- function(d= Data_prism){
+  totlen=dim(d)[1]
+  cvind<-c(1:totlen)
+  groups<-split(cvind,sample(rep(1:10,each = floor(totlen/10))))
+  CV_each<-rep(0,10)
+  for (k in 1:10) {  #10 cross-validation tests
+    test_indx<-groups[[k]]
+    test_data<-d[test_indx,]
+    train_indx<-cvind[-test_indx]
+    train_data<- d[train_indx,]
+    Xtrain<- as.matrix(cbind(train_data$GDD,train_data$EDD,train_data$Pr,train_data$SPI, train_data$Pr2,train_data$GDDEDD,train_data$GDDPr,train_data$EDDPr,train_data$Tmax, train_data$Tmin,train_data$lastSF,train_data$firstFF))
+    Xtest<- as.matrix(cbind(test_data$GDD,test_data$EDD,test_data$Pr,test_data$SPI, test_data$Pr2,test_data$GDDEDD,test_data$GDDPr,test_data$EDDPr,test_data$Tmax,test_data$Tmin, test_data$lastSF,test_data$firstFF))
+    train_model<- cv.glmnet(x= Xtrain, y=train_data$Yield,alpha=1,nfolds=10)
+    pred<-predict(train_model,newx=Xtest,s="lambda.min")
+    CV_each[k]<-mean((pred - test_data$Yield)^2)
+    }
+  NPE<-sqrt(mean(CV_each))/mean(d[ ,"Yield"],na.rm=TRUE)
+  return(NPE)
+}
+tfcv_lasso()
+```
+
+Set up for ten-fold cross validation (this doesn't work due to fips variable)
+```{r}
+tfcv_fit<- function(d= Data_prism){
+  totlen=dim(d)[1]
+  cvind<-c(1:totlen)
+  groups<-split(cvind,sample(rep(1:10,each = floor(totlen/10))))
+  CV_each<-rep(NA,10)
+  sse<- rep(NA,10)
+  for (k in 1:10) {  #10 cross-validation tests
+    test_indx<-groups[[k]]
+    test_data<-d[test_indx, ]
+    train_indx<-cvind[-test_indx]
+    train_data<- d[train_indx,]
+    train_model<- lm(Yield~ GDD+EDD+ poly(Pr,2)+ GDD:EDD + GDD:Pr + Pr:EDD +year+ fips + Tmax + Tmin + lastSF + firstFF, data= train_data)
+    pred<-predict(train_model,test_data) #which variables to test?
+    CV_each[k]<-mean((pred - test_data$Yield)^2)
+    sse[k]<- sum((pred - test_data$Yield)^2)
+  }
+  NPE<-sqrt(mean(CV_each))/mean(d[ ,"Yield"],na.rm=TRUE)
+  SSPE<- sum(sse)
+  return(list("NPE" = NPE, "SSPE"=SSPE))
+}
+tfcv_fit()
+```
+
+Version of full model with weights.
+```{r}
+fit_w<- lm(Yield~ GDD+EDD+ poly(Pr,2)+ GDD:EDD + GDD:Pr + Pr:EDD +year+ fips + Tmax + Tmin + lastSF + firstFF,weights= Data_prism$Area, data= Data_prism) #year and fips are fixed effects
+summary(fit_w); AIC(fit_w); tfcv_simple(fit_w)
+```
+AIC: 425633.6
+NPE: 0.1525634
+Residual standard error: 635.2 on 45636 degrees of freedom
+Multiple R-squared:  0.7768,	Adjusted R-squared:  0.7677 
+F-statistic: 85.35 on 1861 and 45636 DF,  p-value: < 2.2e-16
+
+We'll try a few methods like stepwise AIC.
+```{r}
+# Stepwise AIC model selection to find best model
+aicfit= step(fit)
+summary(aicfit)
+coef(aicfit)
+AIC(aicfit)
+```
+According to the stepwise AIC model selection, the "best" model is:
+lm(formula = Yield ~ GDD + EDD + poly(Pr, 2) + year + fips + 
+    Tmax + Tmin + lastSF + GDD:EDD + GDD:Pr + EDD:Pr, data = Data_prism)
+We'll see how this model performs in terms of prediction. 
+
+```{r}
+model_stepAIC<- lm(Yield ~ GDD + EDD + poly(Pr, 2) + year + fips + 
+    Tmax + Tmin + lastSF + GDD:EDD + GDD:Pr + EDD:Pr, data = Data_prism) 
+#year and fips are fixed effects
+(summary(model_stepAIC))
+```
+
+```{r}
+tfcv_lasso<- function(d= Data_prism){
+  totlen=dim(d)[1]
+  cvind<-c(1:totlen)
+  groups<-split(cvind,sample(rep(1:10,each = floor(totlen/10))))
+  CV_each<-rep(0,10)
+  for (k in 1:10) {  #10 cross-validation tests
+    test_indx<-groups[[k]]
+    test_data<-d[test_indx,]
+    train_indx<-cvind[-test_indx]
+    train_data<- d[train_indx,]
+    Xtrain<- as.matrix(cbind(train_data$GDD,train_data$EDD,train_data$Pr,train_data$SPI, train_data$Pr2,train_data$GDDEDD,train_data$GDDPr,train_data$EDDPr,train_data$Tmax, train_data$Tmin,train_data$lastSF,train_data$firstFF))
+    Xtest<- as.matrix(cbind(test_data$GDD,test_data$EDD,test_data$Pr,test_data$SPI, test_data$Pr2,test_data$GDDEDD,test_data$GDDPr,test_data$EDDPr,test_data$Tmax,test_data$Tmin, test_data$lastSF,test_data$firstFF))
+    train_model<- cv.glmnet(x= Xtrain, y=train_data$Yield,alpha=1,nfolds=10)
+    pred<-predict(train_model,newx=Xtest,s="lambda.min")
+    CV_each[k]<-mean((pred - test_data$Yield)^2)
+    }
+  NPE<-sqrt(mean(CV_each))/mean(d[ ,"Yield"],na.rm=TRUE)
+  return(NPE)
+}
+tfcv_lasso()
+```
+
+Set up for ten-fold cross validation
+```{r}
+tfcv_simple<- function(m= model, d= Data_prism){
+  totlen=dim(d)[1]
+  cvind<-c(1:totlen)
+  groups<-split(cvind,sample(rep(1:10,each = floor(totlen/10))))
+  CV_each<-rep(0,10)
+  for (k in 1:10) {  #10 cross-validation tests
+    test_indx<-groups[[k]]
+    test_data<-d[test_indx, ]
+    train_indx<-cvind[-test_indx]
+    train_data<- d[train_indx,]
+    train_model<- m
+    pred<-predict(train_model,d[test_indx, ]) #which variables to test?
+    CV_each[k]<-mean((pred - test_data)^2)
+    }
+  NPE<-sqrt(mean(CV_each))/mean(d[ ,"Yield"],na.rm=TRUE)
+  return(NPE)
+}
+```
+
+```{r}
+tfcv_simple(m= model_stepAIC); AIC(model_stepAIC)
+```
+model_stepAIC:
+NPE = 0.1506903
+
+Next we'll try model_stepAIC with weights to see if WLS makes a difference.
+```{r}
+model_stepAICw<- lm(Yield ~ GDD + EDD + poly(Pr, 2) + year + fips + 
+    Tmax + Tmin + lastSF + GDD:EDD + GDD:Pr + EDD:Pr, data = Data_prism, weights= Data_prism$Area) #year and fips are fixed effects
+summary(model_stepAIC); AIC(model_stepAICw); tfcv_simple(model_stepAICw)
+```
+AIC: 425631.9
+NPE: 0.152563
+Residual standard error: 16.33 on 45637 degrees of freedom
+Multiple R-squared:  0.7793,	Adjusted R-squared:  0.7703 
+F-statistic: 86.62 on 1860 and 45637 DF,  p-value: < 2.2e-16
+
+Next, I test the model with changing growing seasons. 
+```{r}
+model_CGS<- lm(Yield~ GDD_changingGS+ EDD_changingGS + poly(Pr_changingGS,2)+ GDD_changingGS:EDD_changingGS + GDD_changingGS:Pr_changingGS + Pr_changingGS:EDD_changingGS + year+ fips + Tmax + Tmin + lastSF + firstFF, data= Data_prism) #year and fips are fixed effects
+summary(model_CGS); AIC(model_CGS); tfcv_simple(model_CGS)
+```
+For this model, we have:
+Residual standard error: 16.67 on 45636 degrees of freedom
+Multiple R-squared:  0.7699,	Adjusted R-squared:  0.7605
+F-statistic: 82.05 on 1861 and 45636 DF,  p-value: < 2.2e-16
+AIC: 403909
+NPE: 0.1538503
+The NPE is comparable to that of the other good models. 
+
+```{r}
+model_CGSw<- lm(Yield~ GDD_changingGS+ EDD_changingGS + poly(Pr_changingGS,2)+ GDD_changingGS:EDD_changingGS + GDD_changingGS:Pr_changingGS + Pr_changingGS:EDD_changingGS + year+ fips + Tmax + Tmin + lastSF + firstFF, data= Data_prism, weights= Data_prism$Area) #year and fips are fixed effects
+summary(model_CGSw); AIC(model_CGSw); tfcv_simple(model_CGSw)
+```
+AIC: 427427.4
+NPE: 0.155836
+Residual standard error: 647.4 on 45636 degrees of freedom
+Multiple R-squared:  0.7682,	Adjusted R-squared:  0.7588 
+F-statistic: 81.27 on 1861 and 45636 DF,  p-value: < 2.2e-16
+
+```{r}
+# Stepwise AIC model selection to find best model
+aic_CGS= step(model_CGS)
+summary(aic_CGS)
+coef(aic_CGS)
+AIC(aic_CGS)
+tfcv_simple(aic_CGS)
+```
+model resulting from step AIC:
+Yield ~ GDD_changingGS + EDD_changingGS + poly(Pr_changingGS, 
+    2) + year + fips + Tmax + Tmin + firstFF + GDD_changingGS:EDD_changingGS + 
+    EDD_changingGS:Pr_changingGS
+
+AIC: 403906.5
+NPE: 0.153853    
+Residual standard error: 16.67 on 45638 degrees of freedom
+Multiple R-squared:  0.7699,	Adjusted R-squared:  0.7605 
+F-statistic: 82.14 on 1859 and 45638 DF,  p-value: < 2.2e-16
+ 
+```{r}
+aic_GSw<- lm(Yield ~ GDD_changingGS + EDD_changingGS + poly(Pr_changingGS, 
+    2) + year + fips + Tmax + Tmin + firstFF + GDD_changingGS:EDD_changingGS + 
+    EDD_changingGS:Pr_changingGS, data= Data_prism, weights= Data_prism$Area)
+summary(aic_GSw);AIC(aic_GSw);tfcv_simple(aic_GSw)
+```
+The WLS version of the model is comparable to others but worse than the SLR version of the model:
+AIC: 427425.1
+NPE: 0.1558367
+Residual standard error: 647.4 on 45638 degrees of freedom
+Multiple R-squared:  0.7682,	Adjusted R-squared:  0.7588 
+F-statistic: 81.36 on 1859 and 45638 DF,  p-value: < 2.2e-16
+
+We'll see how the model with changing growing season performs in comparison to the best model with fixed growing seasons.
+```{r}
+model_cgs1<- lm(Yield~ GDD_changingGS+ EDD_changingGS+ poly(Pr_changingGS,2)+ GDD_changingGS:EDD_changingGS + GDD_changingGS:Pr_changingGS + Pr_changingGS:EDD_changingGS +year+ fips, data= Data_prism, weights= Data_prism$Area)
+summary(model_cgs1)
+AIC(model_cgs1); tfcv_simple(model_cgs1)
+```
+This model is comparable to the other best performing models
+
+Residual standard error: 648.1 on 45640 degrees of freedom
+Multiple R-squared:  0.7677,	Adjusted R-squared:  0.7582 
+F-statistic: 81.21 on 1857 and 45640 DF,  p-value: < 2.2e-16
+AIC: 427527.7
+NPE: 0.1560328
+
+```{r}
+model_cgs1nw<- lm(Yield~ GDD_changingGS+ EDD_changingGS+ poly(Pr_changingGS,2)+ GDD_changingGS:EDD_changingGS + GDD_changingGS:Pr_changingGS + Pr_changingGS:EDD_changingGS +year+ fips, data= Data_prism)
+summary(model_cgs1nw)
+AIC(model_cgs1nw); tfcv_simple(model_cgs1nw)
+```
+Summary statistics:
+Residual standard error: 16.69 on 45640 degrees of freedom
+Multiple R-squared:  0.7694,	Adjusted R-squared:   0.76 
+F-statistic: 81.98 on 1857 and 45640 DF,  p-value: < 2.2e-16
+AIC: 404016
+NPE: 0.1540369
+
+Next we'll try doing variable selection using LASSO.
+```{r}
+library(glmnet)
+set.seed(6620)
+Data_prism$Pr2<- (Data_prism$Pr)^2
+Data_prism$GDDEDD<- Data_prism$GDD*Data_prism$EDD
+Data_prism$GDDPr<- Data_prism$GDD*Data_prism$Pr
+Data_prism$EDDPr<- Data_prism$EDD*Data_prism$Pr
+Data_prism$EDDPr2<- Data_prism$EDD*Data_prism$Pr2
+Data_prism$GDDPr2<- Data_prism$GDD*Data_prism$Pr2
+
+Data_prism$Pr_CGS2<- (Data_prism$Pr_changingGS)^2
+Data_prism$GDDEDD_CGS<- Data_prism$GDD_changingGS*Data_prism$EDD_changingGS
+Data_prism$GDDPr_CGS<- Data_prism$GDD_changingGS*Data_prism$Pr_changingGS
+Data_prism$EDDPr_CGS<- Data_prism$EDD_changingGS*Data_prism$Pr_changingGS
+Data_prism$EDDPr2_CGS<- Data_prism$EDD_changingGS*Data_prism$Pr_CGS2
+Data_prism$GDDPr2_CGS<- Data_prism$GDD_changingGS*Data_prism$Pr_CGS2
+
+
+rows <- sample(nrow(Data_prism))
+rData_prism<- Data_prism[rows,]
+```
+
+
+```{r}
+lasso=glmnet(x= as.matrix(cbind(train1$GDD,train1$EDD,train1$Pr,train1$SPI,train1$Pr2,train1$GDDEDD, train1$GDDPr, train1$EDDPr, train1$Tmax, train1$Tmin, train1$lastSF, train1$firstFF)),y=train1$Yield,alpha=1,nlambda=100)
+plot(lasso,xvar="lambda",main="Lasso Regression Betas for Different Values of the Tuning Parameter")
+```
+
+Set up for ten-fold cross validation
+```{r}
+tfcv_lasso<- function(d= Data_prism){
+  totlen=dim(d)[1]
+  cvind<-c(1:totlen)
+  groups<-split(cvind,sample(rep(1:10,each = floor(totlen/10))))
+  CV_each<-rep(0,10)
+  for (k in 1:10) {  #10 cross-validation tests
+    test_indx<-groups[[k]]
+    test_data<-d[test_indx,]
+    train_indx<-cvind[-test_indx]
+    train_data<- d[train_indx,]
+    Xtrain<- as.matrix(cbind(train_data$GDD,train_data$EDD,train_data$Pr,train_data$SPI, train_data$Pr2,train_data$GDDEDD,train_data$GDDPr,train_data$EDDPr,train_data$Tmax, train_data$Tmin,train_data$lastSF,train_data$firstFF,as.factor(train_data$year),train_data$lat, train_data$lon, train_data$EDDPr2, train_data$GDDPr2))
+    Xtest<- as.matrix(cbind(test_data$GDD,test_data$EDD,test_data$Pr,test_data$SPI, test_data$Pr2,test_data$GDDEDD,test_data$GDDPr,test_data$EDDPr,test_data$Tmax,test_data$Tmin, test_data$lastSF,test_data$firstFF,as.factor(test_data$year),test_data$lat,test_data$lon, test_data$EDDPr2, test_data$GDDPr2))
+    train_model<- cv.glmnet(x= Xtrain, y=train_data$Yield,alpha=1,nfolds=10)
+    pred<-predict(train_model,newx=Xtest,s="lambda.min")
+    CV_each[k]<-mean((pred - test_data$Yield)^2)
+    }
+  NPE<-sqrt(mean(CV_each))/mean(d[ ,"Yield"],na.rm=TRUE)
+  return(NPE)
+}
+tfcv_lasso()
+```
+The NPE for the LASSO model is 0.2191738. 
+Next we'll look at the coefficients for the selected regressors
+```{r}
+## use 10-fold crossvalidation to find the best lambda
+X<- as.matrix(cbind(Data_prism$GDD, Data_prism$EDD, Data_prism$Pr, Data_prism$SPI, Data_prism$Pr2, Data_prism$GDDEDD,Data_prism$GDDPr, Data_prism$EDDPr, Data_prism$Tmax, Data_prism$Tmin, Data_prism$lastSF, Data_prism$firstFF, as.factor(Data_prism$year), Data_prism$lat, Data_prism$lon, Data_prism$EDDPr2, Data_prism$GDDPr2))
+cv.lasso=cv.glmnet(x=X,y= Data_prism$Yield,alpha=1,nfolds=10)
+
+## get lambda and best lasso fit
+lambda.lasso=cv.lasso$lambda.min
+lambda.lasso
+
+## beta estimates for best lambda
+betas.lasso=coef(cv.lasso,s="lambda.min")
+betas.lasso
+```
+
+The model according to LASSO is:
+-2.770819e+02 +1.342442e-02 GDD_it -7.918460e-01 EDD_it +1.421272e-01 Pr_it -6.952747e-05 Pr_it^2 +1.143041e+00 SPI + 1.854008e-04 GDDEDD -5.063213e-05 GDDPr + 1.662720e-04 EDDPr + 4.411317e-01 Tmax + 7.692359e+00 Tmin -4.344926e-03 lastSF + 3.750021e-02 firstFF + 1.421954e+00 year + 3.392910e+00 lat -1.418631e+00 lon + 
+
+```{r}
+fipscounts<- as.data.frame(table(Data_prism$fips))
+head(fipscounts)
+fipsg2<- fipscounts[which(fipscounts$Freq >=2, arr.ind= TRUE), ]
+fipsg2
+length(fipscounts$Var1)- length(fipsg2$Var1)
+(length(fipscounts$Var1)- length(fipsg2$Var1))/ length(fipscounts$Var1)
+```
+Less than 5% of counties have less than 2 observations. So could we at least use some form of stratified random sampling where for all counties that have at least 2 years of data (2 observations) we randomly select some to go in the training data and some to go in the test data?

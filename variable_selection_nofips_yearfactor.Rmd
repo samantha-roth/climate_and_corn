@@ -1,0 +1,130 @@
+---
+title: "variable_selection_nofips_yearfactor"
+author: "Samantha M. Roth"
+date: "June 11, 2020"
+output: html_document
+---
+
+Load data, packages.
+```{r}
+setwd("c:/Users/smr31/advising related/climate and crop research- summer 2020/Climate_CornYield-master-new/Climate_CornYield-master")
+library(sp); library(maps); library(maptools); library(ncdf4); library(ggplot2); library(usmap); library(precintcon); library(BMS); library(adaptMCMC); library(geoR) #for variogram
+library(housingData) #for returning county centroid
+library(gstat); library(fields); library(binaryLogic); library(car)
+load("Data_prism")
+Data_prism<-Data_prism[complete.cases(Data_prism), ]
+Data_prism$StateANSI<-factor(Data_prism$StateANSI)
+Data_prism$year<-factor(Data_prism$year)
+#Data_prism$sqrtEDD<- sqrt(Data_prism$EDD)
+#Data_prism$sqrtPr<- sqrt(Data_prism$Pr)
+```
+
+
+Full model with all interactions:
+```{r}
+fit<- lm(Yield~ GDD+EDD+ poly(Pr,2) + year + Tmax + Tmin + lastSF + firstFF + GDD:EDD + GDD:poly(Pr,2) + poly(Pr,2):EDD + GDD:Tmax +GDD:Tmin + GDD:lastSF + GDD:firstFF + EDD:Tmax + EDD:Tmin + EDD:lastSF + EDD:firstFF + poly(Pr,2):Tmax + poly(Pr,2):Tmin + poly(Pr,2):lastSF + poly(Pr,2):firstFF + Tmax:Tmin + Tmax:lastSF + Tmax:firstFF + Tmin:lastSF +Tmin:firstFF + lastSF:firstFF, data= Data_prism) 
+summary(fit); AIC(fit); vif(fit)
+```
+Full Model:
+Residual standard error: 22.12 on 47431 degrees of freedom
+Multiple R-squared:  0.5789,	Adjusted R-squared:  0.5783 
+F-statistic: 987.9 on 66 and 47431 DF,  p-value: < 2.2e-16
+AIC: 429028.7
+NPE: 0.2084848
+
+Ten-fold cross validation
+```{r}
+tfcv_fit<- function(d= Data_prism){
+  totlen=dim(d)[1]
+  cvind<-c(1:totlen)
+  groups<-split(cvind,sample(rep(1:10,each = floor(totlen/10))))
+  CV_each<-rep(NA,10)
+  sse<- rep(NA,10)
+  for (k in 1:10) {  #10 cross-validation tests
+    test_indx<-groups[[k]]
+    test_data<-d[test_indx, ]
+    train_indx<-cvind[-test_indx]
+    train_data<- d[train_indx,]
+    train_model<- lm(Yield ~ GDD+EDD+ poly(Pr,2) + year + Tmax + Tmin + lastSF + firstFF + GDD:EDD + GDD:poly(Pr,2) + poly(Pr,2):EDD + GDD:Tmax +GDD:Tmin + GDD:lastSF + GDD:firstFF + EDD:Tmax + EDD:Tmin + EDD:lastSF + EDD:firstFF + poly(Pr,2):Tmax + poly(Pr,2):Tmin + poly(Pr,2):lastSF + poly(Pr,2):firstFF + Tmax:Tmin + Tmax:firstFF + Tmin:lastSF +Tmin:firstFF + lastSF:firstFF, data= train_data)
+    pred<-predict(train_model,test_data) #which variables to test?
+    CV_each[k]<-mean((pred - test_data$Yield)^2)
+    sse[k]<- sum((pred - test_data$Yield)^2)
+  }
+  NPE<-sqrt(mean(CV_each))/mean(d[ ,"Yield"],na.rm=TRUE)
+  SSPE<- sum(sse)
+  return(list("NPE" = NPE, "SSPE"=SSPE))
+}
+tfcv_fit()
+```
+
+Next we'll use stepwise AIC variable selection to see if we get any improvements
+```{r}
+aicfit= step(fit)
+summary(aicfit)
+AIC(aicfit)
+```
+aicfit: 
+lm(formula = Yield ~ GDD + EDD + poly(Pr, 2) + year + Tmax + 
+    Tmin + lastSF + firstFF + GDD:EDD + GDD:poly(Pr, 2) + EDD:poly(Pr, 
+    2) + GDD:Tmax + GDD:Tmin + GDD:lastSF + GDD:firstFF + EDD:Tmax + 
+    EDD:Tmin + EDD:lastSF + EDD:firstFF + poly(Pr, 2):Tmax + 
+    poly(Pr, 2):Tmin + poly(Pr, 2):lastSF + poly(Pr, 2):firstFF + 
+    Tmax:Tmin + Tmax:firstFF + Tmin:lastSF + Tmin:firstFF + lastSF:firstFF, 
+    data = Data_prism)
+Residual standard error: 22.12 on 47432 degrees of freedom
+Multiple R-squared:  0.5789,	Adjusted R-squared:  0.5783 
+F-statistic:  1003 on 65 and 47432 DF,  p-value: < 2.2e-16
+AIC: 429026.8
+NPE: 0.2084889
+
+```{r}
+fitCGS<- lm(Yield~ GDD_changingGS +EDD_changingGS + poly(Pr_changingGS,2) + year + Tmax + Tmin + lastSF + firstFF + GDD_changingGS:EDD_changingGS + GDD_changingGS:poly(Pr_changingGS,2) + poly(Pr_changingGS,2):EDD_changingGS + GDD_changingGS:Tmax + GDD_changingGS:Tmin + GDD_changingGS:lastSF + GDD_changingGS:firstFF + EDD_changingGS:Tmax + EDD_changingGS:Tmin  + EDD_changingGS:lastSF +EDD_changingGS:firstFF + poly(Pr_changingGS,2):Tmax + poly(Pr_changingGS,2):Tmin + poly(Pr_changingGS,2):lastSF + poly(Pr_changingGS,2):firstFF + Tmax:Tmin +Tmax:lastSF + Tmax:firstFF + Tmin:lastSF +Tmin:firstFF + lastSF:firstFF, data= Data_prism) 
+summary(fitCGS); AIC(fitCGS); vif(fitCGS)
+```
+fitCGS: worse
+Residual standard error: 23.23 on 47431 degrees of freedom
+Multiple R-squared:  0.5357,	Adjusted R-squared:  0.5351 
+F-statistic: 829.3 on 66 and 47431 DF,  p-value: < 2.2e-16
+AIC: 433661.5
+NPE: 0.218913
+
+```{r}
+fit2<- lm(Yield~ GDD+EDD+ poly(Pr,2) + as.factor(year) + Tmax + Tmin + lastSF + firstFF + GDD:EDD + GDD:poly(Pr,2) + poly(Pr,2):EDD + GDD:Tmax +GDD:Tmin + GDD:lastSF + GDD:firstFF + EDD:Tmax + EDD:Tmin + EDD:lastSF + EDD:firstFF + poly(Pr,2):Tmax + poly(Pr,2):Tmin + poly(Pr,2):lastSF + poly(Pr,2):firstFF + Tmax:Tmin + Tmax:firstFF + Tmin:lastSF +Tmin:firstFF + lastSF:firstFF, data= Data_prism) 
+summary(fit2); AIC(fit2); vif(fit2)
+Data_prism$hindcast_fit2<- predict(fit2, Data_prism)
+Data_prism$residual_fit2<-Data_prism$Yield-Data_prism$hindcast_fit2 #the residuals
+```
+BEST MODEL:
+fit2: no Tmax:lastSF
+Residual standard error: 22.12 on 47432 degrees of freedom
+Multiple R-squared:  0.5789,	Adjusted R-squared:  0.5783 
+F-statistic:  1003 on 65 and 47432 DF,  p-value: < 2.2e-16
+AIC: 429026.8
+NPE: 0.2084734
+
+```{r}
+beta.hat=fit2$coef #get the coefficient estimates
+yhat=fitted(fit2)
+eps=resid(fit2)
+plot(yhat,eps,main="y-hat vs residuals")
+abline(h=0,col="red",lwd=2)
+qqnorm(eps)
+qqline(eps)
+```
+The residual plot looks pretty good, it seems as though there are many more medium values of yhat that small and large values of yhat. This is backed up by the histogram below.
+```{r}
+hist(yhat)
+```
+The appearance of possible fanning is potentially due to the distribution of yhat.
+```{r}
+source("C:/Users/smr31/STAT511/partial residual plots.r")
+## mean structure
+prp(fit2,data= Data_prism,names=c("GDD"))
+prp(fit2,data= Data_prism,names=c("EDD"))
+prp(fit2,data= Data_prism,names=c("Pr"))
+prp(fit2,data= Data_prism,names=c("year"))
+prp(fit2,data= Data_prism,names=c("lastSF"))
+prp(fit2,data= Data_prism,names=c("firstFF"))
+prp(fit2,data= Data_prism,names=c("Tmax"))
+prp(fit2,data= Data_prism,names=c("Tmin"))
+```

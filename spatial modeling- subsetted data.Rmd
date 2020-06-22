@@ -1,0 +1,117 @@
+---
+title: "spatial modeling- subsetted data"
+author: "Samantha M. Roth"
+date: "6/18/2020"
+output: html_document
+---
+
+```{r}
+setwd("c:/Users/smr31/advising related/climate and crop research- summer 2020/Climate_CornYield-master-new/Climate_CornYield-master")
+library(sp)
+library(maps)
+library(maptools)
+library(ncdf4)
+library(ggplot2)
+library(usmap)
+library(precintcon)
+library(BMS)
+library(adaptMCMC)
+library(geoR) #for variogram
+library(housingData) #for returning county centroid
+library(gstat)
+library(fields)
+library(binaryLogic)
+load("Data_prism")
+```
+Define the subset of locations of interest (in our first example it is just year 1, 1981)
+```{r}
+loc_sub<- cbind(Data_prism$lat[which(Data_prism$year==1)], Data_prism$lon[which(Data_prism$year==1)])
+data_sub<- Data_prism$Yield[which(Data_prism$year==1)]
+fips_sub<- Data_prism$fips[which(Data_prism$year==1)]
+```
+
+We subset the data to only include the first year of data and turn it into a geodata object. 
+```{r}
+prism_sub<- Data_prism[Data_prism$year==1,]
+gd_prism_sub<- as.geodata(prism_sub, coords.col= 14:15, data.col = 1, covar.col = c("GDD", "EDD", "Pr", "Tmax", "Tmin", "lastSF", "firstFF"))
+summary(gd_prism_sub)
+```
+Create the variogram
+```{r}
+vg<- variog(geodata= gd_prism_sub)
+plot(vg)
+```
+
+```{r}
+#vfit_aic<- variofit(vario= vg_aic, ini.cov.pars= c(1,1))
+#summary(vfit_aic)
+init_s2<- seq(from= 1, to= 1000, length= 1000)
+init_phi<- seq(from= .01, to= 100, length= length(init_s2))
+init<- cbind(init_s2, init_phi)
+vfit<- variofit(vario= vg, ini.cov.pars = init)
+summary(vfit)
+```
+From testing different sets of initial values to minimize the loss function, the estimates are simga^2= 960.9062 and phi= 5.4799.
+
+```{r}
+trend1<- trend.spatial(trend= "cte", geodata= gd_prism_sub, add.to.trend = ~ GDD + EDD + Pr + Tmax + Tmin + lastSF + firstFF)
+
+trend2<-  trend.spatial(trend= "cte", geodata= gd_prism_sub, add.to.trend = ~ GDD + EDD + Pr + I(Pr^2) + Tmax + Tmin + lastSF + firstFF)
+
+trend3<- trend.spatial(trend="cte", geodata = gd_prism_sub, add.to.trend= ~  GDD + EDD + Pr + I(Pr^2) + Tmax + Tmin + lastSF + firstFF+ I(GDD*EDD) + I(GDD*Pr) + I(Pr *EDD) + I(GDD*Tmax) + I(GDD*Tmin) + I(GDD*lastSF) + I(GDD*firstFF) + I(EDD*Tmax) + I(EDD*Tmin) + I(EDD*lastSF) + I(EDD*firstFF) + I(Pr*Tmax) + I(Pr*Tmin) + I(Pr*lastSF) + I(Pr*firstFF) + I(Tmax*Tmin) + I(Tmax*lastSF) + I(Tmax*firstFF) + I(Tmin*lastSF) + I(Tmin*firstFF) + I(lastSF*firstFF))
+```
+
+Next, we'll train the model to predict Yield with GDD, EDD, Pr, Tmax, Tmin, lastSF, firstFF, and 
+```{r}
+geomodel1<- likfit(geodata= gd_prism_sub, trend= trend1, ini.cov.pars= c(960.9062, 5.4799))
+summary(geomodel1)
+resids<- resid(geomodel1)
+```
+```{r}
+geomodel2<- likfit(geodata= gd_prism_sub, trend= trend2, ini.cov.pars= c(960.9062, 5.4799))
+summary(geomodel2)
+resids<- resid(geomodel2)
+```
+
+```{r}
+geomodel3<- likfit(geodata= gd_prism_sub, trend= trend3, ini.cov.pars= c(960.9062, 5.4799))
+summary(geomodel3)
+resids<- resid(geomodel3)
+```
+
+Create a dataframe for the residuals
+```{r}
+resid_data<- as.data.frame(matrix(rep(NA),nrow= length(resids), ncol=1))
+resid_data$residual<- resids
+resid_data$fips<- fips_sub
+resid_data$lat<- loc_sub[,1]
+resid_data$lon<- loc_sub[,2]
+head(resid_data)
+```
+Plot the residuals over space.
+```{r}
+library(sp)
+library(maps)
+library(maptools)
+library(ncdf4)
+library(ggplot2)
+library(usmap)
+library(precintcon)
+library(BMS)
+library(adaptMCMC)
+library(geoR) #for variogram
+library(housingData) #for returning county centroid
+library(gstat)
+library(fields)
+library(binaryLogic)
+#year 1's res plot
+dir.create("fig_res_spatial2")
+filename<-paste("fig_res_spatial2/",1,".jpeg",sep="")
+jpeg(file = filename,width = 800,height=800)
+  a=plot_usmap(regions = "counties", include=c("PA","NY","NJ","MD","DE","DC","NC","VA","SC","WV","OH","MI","GA","KY","IN","IL","AL","TN","WI","MS","MN","MO","LA","AR","IA"), data=resid_data, values = "residual") + labs(title = paste("Yield residual of each county in ",1981,sep=""))+ scale_fill_gradient2(low = "blue",mid="white", high ="red", limits=c(-20,20), name="bu/acre")+theme(plot.title = element_text(size=14))
+  plot(a)
+  dev.off()
+```
+
+
+
